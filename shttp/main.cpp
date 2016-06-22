@@ -119,7 +119,8 @@ void send_file_chunk(int socket, int file, const size_t chunk_size, HttpPool & p
 }
 
 
-// TODO: unkludge this since it ignores all the headers and only looks for GET and returns 500 for everything else
+// TODO: unkludge this since it ignores all the headers and only looks for GET and only responds with 404 or 500 when it encounters an error
+// TODO: Only supports the Content-Type of "application/octet-stream"
 void read_http_request(int socket,sockaddr_in client_addr, HttpPool & pool) {
     char request[HTTP_REQUEST_SIZE];
     
@@ -130,13 +131,13 @@ void read_http_request(int socket,sockaddr_in client_addr, HttpPool & pool) {
         for(int i=0; i < 3; i++)
             request[i] = toupper(request[i]);
         
-        int starting_character = 4;
-        if ( strncmp(request, "GET ", starting_character) == 0 ) {
+        int starting_character = 5;
+        if ( strncmp(request, "GET /", starting_character) == 0 ) {
             // reuse the request input buffer so we are going to sliceup the buffer
-            // turn "get /someurl HTTP/1.1" into "./someurl"
-            starting_character -= 1;
+            // turn "get resource HTTP/1.1\n[headers]\n\n" into "get resource" and find offset to the first character
+            // after the /
+
             int ending_character = starting_character;
-            request[ending_character] = '.';
             while ( ending_character < request_read) {
                 if (request[ending_character] == ' ' ||  request[ending_character] == '\n' )
                     break;
@@ -144,9 +145,11 @@ void read_http_request(int socket,sockaddr_in client_addr, HttpPool & pool) {
             }
             request[ending_character] = '\0';
             
+
+#ifdef DEBUG
+ //           std::cout<< std::this_thread::get_id() << ":" << client_addr.sin_addr.s_addr << " " << request_read << " " << request+starting_character << "." << std::endl;
+#endif
             // TODO: this is pretty bad security risk size we preserve the user input string
-            std::cout<< std::this_thread::get_id() << ":" << client_addr.sin_addr.s_addr << " " << request_read << " " << request+starting_character << "." << std::endl;
-            
             int file = ::open(request+starting_character, O_RDONLY);
             if ( file > -1 ) {
                 ::write(socket,HTTP_OK,HTTP_OK_SIZE);
