@@ -50,6 +50,13 @@ bool HttpRouting::route(std::unique_ptr<HttpConnection> request) {
             // handled = true;
         }
     }
+    if ( !handled ) {
+        request->set_status(HTTP_NOT_FOUND, "Not found");
+        
+        
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),nullptr));
     
+    }
+
     return handled;
 }

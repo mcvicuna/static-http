@@ -71,8 +71,9 @@ void HttpConnection::read(HttpConnection *connection) {
 
                     std::cerr << "Handling " << ++conn->requests_handled << " " << conn->resource << std::endl;
 
-
-                    HttpRouting::get().route(std::move(conn)); // send this off to the router
+                    // send this off to the router
+                    HttpRouting::get().route(std::move(conn));
+                        
 
                 }
                 else  {
@@ -175,7 +176,7 @@ void HttpConnection::write_response(HttpConnection *connection, std::istream *_b
     conn->response << HTTP_V1_1 << " " << conn->status_code << " " << conn->status_reason << HTTP_ENDL;
     size_t body_length = 0;
     
-    if ( !body->fail() ) {
+    if ( body && !body->fail() ) {
         // get length of result:
         body->seekg (0, std::ios_base::end);
         body_length = body->tellg();

@@ -140,8 +140,7 @@ class DefaultRoute : public HttpRoute {
         
         
         
-        std::unique_ptr<std::ifstream> file
-        = std::unique_ptr<std::ifstream>(new std::ifstream());
+        std::unique_ptr<std::ifstream> file = std::unique_ptr<std::ifstream>(new std::ifstream());
         std::string filename = params[0].substr(1);
         // std::cerr << "Default " << request.resource << "->" << filename << std::endl;
         file->open(filename,std::ios_base::binary | std::ios_base::in);
@@ -171,8 +170,9 @@ class EchoRoute : public HttpRoute {
         
         request->set_status(HTTP_OK, "OK");
         request->write_header(HTTP_HEADER_CONTENT_TYPE, HttpContentTypes::get().get_content_by_name("html"));
+        std::unique_ptr<std::stringstream> response(new std::stringstream(params[0]));
         
-        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),new std::stringstream(params[0])));
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),response.release()));
 
         return true;
     };
@@ -180,10 +180,13 @@ class EchoRoute : public HttpRoute {
 
 class FriendRoute : public HttpRoute {
     virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
-        std::cerr << "FriendRoute " << request->resource << "?";
-        for(auto param : params )
-            std::cerr << param << ",";
-        std::cerr << std::endl;
+        request->set_status(HTTP_OK, "OK");
+        request->write_header(HTTP_HEADER_CONTENT_TYPE, HttpContentTypes::get().get_content_by_name("html"));
+        
+        std::unique_ptr<std::stringstream> response(new std::stringstream());
+        *response << "How would I know if " << params[0] << " and " << params[1] << " are friends " << std::endl;
+        
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),response.release()));
 
         return true;
     };
