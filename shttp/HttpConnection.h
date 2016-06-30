@@ -74,7 +74,7 @@ public:
     void set_status(int code, const std::string reason);
    
     static void read(HttpConnection *connection);
-    static void write_response(HttpConnection *connection,std::istream *_body);
+    static void write_response(HttpConnection *connection,std::istream *_body=nullptr);
     static void write_body(HttpConnection *connection,std::istream *_body,const size_t chunk_size);
     
     static void clean_up(HttpConnection *connection);
