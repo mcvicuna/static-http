@@ -7,6 +7,7 @@
 //
 
 #include <iostream>
+#include <fstream>
 
 #include <thread>
 #include <vector>
@@ -21,81 +22,22 @@
 // OSX TCP/IP socket addr header
 #include <netinet/in.h>
 
+#include "HttpConnection.h"
+#include "HttpPool.h"
+#include "HttpRouting.h"
+#include "HttpContenttypes.h"
 
-const size_t HTTP_REQUEST_SIZE = PATH_MAX+32;
 
-const int MTU = 1500; // Guess at maximum transmission unit
-const int MAX_FD = 256; // Guess at maximum number of file descriptors per process
 
-//TODO: Tune the three following constants to find optimal number of open connections and concurrent streaming files
-// based on the maximum number of open file descriptors
-const int MAX_CONNECTION_BACKLOG = MAX_FD/8;  // use only a portion for the backlog
-const int MAX_WORKER_QUEUE_LENGTH = (MAX_FD-MAX_CONNECTION_BACKLOG)/2; // each request consumes two FD
 
-//TODO: Tune the following two constants to find optimal throughput
-const size_t INITIAL_FILEREAD_SIZE = MTU*4;
-const size_t CHUNKED_FILEREAD_SIZE = MTU;
 
-//TODO: Unkludge response status messages
-const char HTTP_OK[] = "HTTP/1.0 200 OK\nContent-Type: application/octet-stream\n\n";
-const size_t HTTP_OK_SIZE = sizeof(HTTP_OK)-1;
-const char HTTP_404[] = "HTTP/1.0 404 Not Found\n\n";
-const size_t HTTP_404_SIZE = sizeof(HTTP_404)-1;
-const char HTTP_500[] = "HTTP/1.0 500 Error\n\n";
-const size_t HTTP_500_SIZE = sizeof(HTTP_500)-1;
 
-class HttpPool {
-    std::vector<std::thread> workers;
-    std::deque<std::function<void()> > requests;
-    std::condition_variable request_ready;
-    std::atomic<bool> shutdown;
-    std::mutex task_queue_mutex;
-public:
-    HttpPool(size_t number_threads) : shutdown(false) {
-        // lambdas for easy coding
-        for(int i=0; i < number_threads; i++) {
-            workers.push_back(std::thread([this]() {
-                std::function<void()> request;
-                // loop infinitely since we will be notified of exit by another thread
-                for(;;) {
-                    // for safety do the locking with a control block
-                    {
-                        std::unique_lock<std::mutex> lock(task_queue_mutex);
-                        
-                        request_ready.wait(lock, [this]() {
-                            return !(requests.size() == 0 && !shutdown);
-                        });
-                        
-                        if ( shutdown )
-                            return;
-                        
-                        request = requests.front();
-                        requests.pop_front();
-                        
-                    } // lock released
-                    request();
-                }
-                
-                return;
-            }));
-        }
-    }
-    
-    bool enqueue(std::function<void()> func) {
-        bool retVal = false;
-        std::unique_lock<std::mutex> lock(task_queue_mutex);
 
-        if (requests.size() < MAX_WORKER_QUEUE_LENGTH ) {
-            requests.push_back(func);
-            retVal = true;
-            request_ready.notify_one();
-        }
-        return retVal;
-    }
-    
-};
+#if 0
 
-void send_file_chunk(int socket, int file, const size_t chunk_size, HttpPool & pool) {
+
+
+void send_file_chunk(int socket, int file, const size_t chunk_size) {
     char buffer[chunk_size];
     
     size_t bytes_in = read(file,buffer,chunk_size);
@@ -109,7 +51,7 @@ void send_file_chunk(int socket, int file, const size_t chunk_size, HttpPool & p
     }
     else {
         write(socket,buffer,bytes_in);
-        bool queued = pool.enqueue(std::bind(send_file_chunk,socket,file,CHUNKED_FILEREAD_SIZE,std::ref(pool)));
+        bool queued = HttpPool::get().enqueue(std::bind(send_file_chunk,socket,file,CHUNKED_FILEREAD_SIZE));
         if ( !queued ) {
             // TODO: Need better error logging
             std::cerr << "error queueing some unknown file " << errno;
@@ -118,10 +60,9 @@ void send_file_chunk(int socket, int file, const size_t chunk_size, HttpPool & p
     
 }
 
-
 // TODO: unkludge this since it ignores all the headers and only looks for GET and only responds with 404 or 500 when it encounters an error
 // TODO: Only supports the Content-Type of "application/octet-stream"
-void read_http_request(int socket,sockaddr_in client_addr, HttpPool & pool) {
+void http_request(HttpConnection http) {
     char request[HTTP_REQUEST_SIZE];
     
     size_t request_read = ::read(socket,(void *)request,HTTP_REQUEST_SIZE);
@@ -150,20 +91,36 @@ void read_http_request(int socket,sockaddr_in client_addr, HttpPool & pool) {
  //           std::cout<< std::this_thread::get_id() << ":" << client_addr.sin_addr.s_addr << " " << request_read << " " << request+starting_character << "." << std::endl;
 #endif
             // TODO: this is pretty bad security risk size we preserve the user input string
-            int file = ::open(request+starting_character, O_RDONLY);
-            if ( file > -1 ) {
-                ::write(socket,HTTP_OK,HTTP_OK_SIZE);
-                bool queued = pool.enqueue(std::bind(send_file_chunk,socket,file,INITIAL_FILEREAD_SIZE,std::ref(pool)));
-                if ( !queued ) {
+            char *filename = request+starting_character;
+             // send the content type
+            std::string content_type = get_content_type(filename);
+            if ( content_type.length()) {
+            
+                int file = ::open(filename, O_RDONLY);
+                if ( file > -1 ) {
+                    ::write(socket,HTTP_OK,HTTP_OK_SIZE);
+                    // send the content type
+                    ::write(socket,HTTP_CONTENT_TYPE,HTTP_CONTENT_TYPE_SIZE);
+                    ::write(socket,content_type.c_str(),content_type.length());
+                    ::write(socket,HTTP_END_OF_HEADER,HTTP_END_OF_HEADER_SIZE);
+                    
+                    bool queued = pool.enqueue(std::bind(send_file_chunk,socket,file,INITIAL_FILEREAD_SIZE,std::ref(pool)));
+                    if ( !queued ) {
+                        // TODO: Need better error logging
+                        std::cerr << "error queueing reads" <<  std::endl;
+                        ::close(socket);
+                        
+                    }
+                }
+                else {
+                    ::write(socket,HTTP_404, HTTP_404_SIZE);
                     // TODO: Need better error logging
-                    std::cerr << "error queueing reads" <<  std::endl;
+                    std::cerr << "error opening some file " << errno << " " << request+starting_character <<  std::endl;
                     ::close(socket);
                 }
             }
-            else {
-                ::write(socket,HTTP_404, HTTP_404_SIZE);
-                // TODO: Need better error logging
-                std::cerr << "error opening some file " << errno << " " << request+starting_character <<  std::endl;
+            else { // cant find content type
+                ::write(socket,HTTP_500,HTTP_500_SIZE);
                 ::close(socket);
             }
 
@@ -176,10 +133,72 @@ void read_http_request(int socket,sockaddr_in client_addr, HttpPool & pool) {
     
     return;
 }
+#endif
 
+class DefaultRoute : public HttpRoute {
+    virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
+        
+        
+        
+        std::unique_ptr<std::ifstream> file
+        = std::unique_ptr<std::ifstream>(new std::ifstream());
+        std::string filename = params[0].substr(1);
+        // std::cerr << "Default " << request.resource << "->" << filename << std::endl;
+        file->open(filename,std::ios_base::binary | std::ios_base::in);
+        if ( file->is_open() ) {
+        
+        
+            request->set_status(HTTP_OK, "OK");
+        
+            std::string content_type = HttpContentTypes::get().get_content_by_ext(params[0].c_str());
+            
+            request->write_header(HTTP_HEADER_CONTENT_TYPE, content_type);
+            
+        }
+        else {
+            request->set_status(HTTP_NOT_FOUND, "Not found");
+        }
+        
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),file.release()));
+        
+        return true;
+    };
+};
+
+class EchoRoute : public HttpRoute {
+    virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
+        std::cerr << "EchoRoute " << request->resource << "?" << params[0];
+        
+        request->set_status(HTTP_OK, "OK");
+        request->write_header(HTTP_HEADER_CONTENT_TYPE, HttpContentTypes::get().get_content_by_name("html"));
+        
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),new std::stringstream(params[0])));
+
+        return true;
+    };
+};
+
+class FriendRoute : public HttpRoute {
+    virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
+        std::cerr << "FriendRoute " << request->resource << "?";
+        for(auto param : params )
+            std::cerr << param << ",";
+        std::cerr << std::endl;
+
+        return true;
+    };
+};
+
+
+void setup_routes() {
+    HttpRouting::get().addRoute("GET", "([^?]+[^\\/]$)", std::unique_ptr<DefaultRoute>(new DefaultRoute()));
+    HttpRouting::get().addRoute("GET", "\\/echo\\?(.+)", std::unique_ptr<EchoRoute>(new EchoRoute()));
+    HttpRouting::get().addRoute("GET", "\\/friend\\/([^/]+)\\/([^/]+)\\/", std::unique_ptr<FriendRoute>(new FriendRoute()));
+    
+
+}
 
 int main(int argc, const char * argv[]) {
-    //TODO: remove security risk by having static content server. CDN perhaps?
     
     char *cwd = getcwd(NULL, 0);
     
@@ -189,6 +208,8 @@ int main(int argc, const char * argv[]) {
     std::cout << "Creating socket" << std::endl;
     int listen_on = socket(PF_INET,SOCK_STREAM,0);
     if ( listen_on > 0 ) {
+        int reuse_flag = 1;
+        setsockopt(listen_on, SOL_SOCKET, SO_REUSEADDR, &reuse_flag, sizeof(reuse_flag));
         sockaddr_in bind_addr;
         
         bzero(&bind_addr, sizeof(bind_addr));
@@ -204,13 +225,26 @@ int main(int argc, const char * argv[]) {
                 sockaddr_in client_addr;
                 socklen_t client_addr_length = sizeof(client_addr);
                 int client_socket = 0;
-                HttpPool pool(std::thread::hardware_concurrency()-1);
+                
+                setup_routes();
                 
                 std::cout << "Accepting socket" << std::endl;
                 while ( client_socket != -1 )
                 {
                     client_socket = accept(listen_on, (sockaddr *)&client_addr, &client_addr_length);
-                    bool queued = pool.enqueue(std::bind(read_http_request,client_socket,client_addr,std::ref(pool)));
+//                     std::cout << "new connection" << client_socket << std::endl;
+                    // check return of accept
+                    if ( client_socket < 0 ) {
+                        //TODO: Log error
+                        break;
+                    }
+//                    int status = fcntl(client_socket, F_SETFL, fcntl(client_socket, F_GETFL, 0) | O_NONBLOCK);
+//                    if ( status == -1 ) {
+//                        std::cerr << "Cant make socket noblocking " << errno << std::endl;
+//                        break;
+//                    }
+                    HttpConnection *connection = new HttpConnection(client_socket);
+                    bool queued = HttpPool::get().enqueue(std::bind(&HttpConnection::read,connection));
                     if ( !queued ) {
                         std::cerr << "Failed to enqueue request\n" << std::endl;
                         break;
