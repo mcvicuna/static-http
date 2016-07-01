@@ -24,9 +24,10 @@ void HttpConnection::read(HttpConnection *connection) {
     std::unique_ptr<HttpConnection> conn(connection);
     char input[HTTP_REQUEST_SIZE];
     
-    if ( conn->idle_tries > MAX_IDLE_TRIES ) {
+    //switch to time based idle timeout
+    if (  time(NULL) > conn->last_request+MAX_IDLE_TIMEOUT ) {
         conn->close = true;
-        std::cerr << "connection idle" << std::endl;
+        std::cerr << "connection idle " << time(NULL) << "<" << conn->last_request+MAX_IDLE_TIMEOUT << std::endl;
         HttpPool::get().enqueue(std::bind(&HttpConnection::clean_up,conn.release()));
         return;
     }
@@ -55,6 +56,8 @@ void HttpConnection::read(HttpConnection *connection) {
                 HttpPool::get().enqueue(std::bind(&HttpConnection::clean_up,conn.release()));
             }
             else if ( request_read != 0 ) {
+                // reset timeout so slow connections don't timeout in middle of requests
+                conn->last_request = time(NULL);
                 conn->bytes_read += request_read;
                 conn->buffer.write(input,request_read);
                 // seach for the "\n\n"
@@ -78,7 +81,6 @@ void HttpConnection::read(HttpConnection *connection) {
                 }
                 else  {
                     std::cerr << "multiple packets " << std::endl;
-                    conn->idle_tries += 1;
                     HttpPool::get().enqueue(std::bind(&HttpConnection::read, conn.release()));
                 }
             }
@@ -86,7 +88,6 @@ void HttpConnection::read(HttpConnection *connection) {
             
             else {
                 //std::cerr << "multiple request_read packets " << std::endl;
-                conn->idle_tries += 1;
                 HttpPool::get().enqueue(std::bind(&HttpConnection::read, conn.release()));
                 
             }
@@ -94,7 +95,6 @@ void HttpConnection::read(HttpConnection *connection) {
     }
     else {
             //std::cerr << "multiple poll_status packets " << std::endl;
-            conn->idle_tries += 1;
             HttpPool::get().enqueue(std::bind(&HttpConnection::read, conn.release()));
         
     }
@@ -142,7 +142,6 @@ void HttpConnection::parse_request(std::string request) {
                     // TODO: bad head field
                     // assume its the body?
                     std::cerr << "Parsing body? " << std::endl;
-                    body = header;
                     break;
                 }
             }
@@ -169,18 +168,17 @@ void HttpConnection::parse_request(std::string request) {
     
 }
 
-void HttpConnection::write_response(HttpConnection *connection, std::istream *_body) {
+void HttpConnection::write_response(HttpConnection *connection) {
     std::unique_ptr<HttpConnection> conn(connection);
-    std::unique_ptr<std::istream> body(_body);
 
     conn->response << HTTP_V1_1 << " " << conn->status_code << " " << conn->status_reason << HTTP_ENDL;
     size_t body_length = 0;
     
-    if ( body && !body->fail() ) {
+    if ( conn->body != nullptr && !conn->body->fail() ) {
         // get length of result:
-        body->seekg (0, std::ios_base::end);
-        body_length = body->tellg();
-        body->seekg (0, std::ios_base::beg);
+        conn->body->seekg (0, std::ios_base::end);
+        body_length = conn->body->tellg();
+        conn->body->seekg (0, std::ios_base::beg);
 
     }
     
@@ -205,7 +203,7 @@ void HttpConnection::write_response(HttpConnection *connection, std::istream *_b
     
     ::write(conn->fds.fd,header.c_str(),header.length());
     if ( body_length )
-        HttpPool::get().enqueue(std::bind(&HttpConnection::write_body, conn.release(), body.release(), INITIAL_FILEREAD_SIZE));
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_body, conn.release(), INITIAL_FILEREAD_SIZE));
     else
         HttpPool::get().enqueue(std::bind(&HttpConnection::clean_up,conn.release()));
 
@@ -218,20 +216,19 @@ void HttpConnection::set_status(int code, const std::string reason)
     
 }
 
-void HttpConnection::write_body(HttpConnection *connection, std::istream *_body,const size_t chunk_size) {
+void HttpConnection::write_body(HttpConnection *connection, const size_t chunk_size) {
     std::unique_ptr<HttpConnection> conn(connection);
-    std::unique_ptr<std::istream> body(_body);
     char buffer[chunk_size];
     
-    body->read(buffer,chunk_size);
-    if ( !body->fail() ) {
+    conn->body->read(buffer,chunk_size);
+    if ( !conn->body->fail() ) {
         ::write(conn->fds.fd,buffer,chunk_size);
-        HttpPool::get().enqueue(std::bind(&HttpConnection::write_body, conn.release(), body.release(),CHUNKED_FILEREAD_SIZE));
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_body, conn.release(),CHUNKED_FILEREAD_SIZE));
     }
     else {
         
-        if ( body->gcount() > 0 ) {
-            ::write(conn->fds.fd,buffer,body->gcount());
+        if ( conn->body->gcount() > 0 ) {
+            ::write(conn->fds.fd,buffer,conn->body->gcount());
             //::write(conn->fds.fd,HTTP_HEADER_END.c_str(),HTTP_HEADER_END.size());
         }
         // clean up
@@ -241,6 +238,7 @@ void HttpConnection::write_body(HttpConnection *connection, std::istream *_body,
     
 }
 
+// called after request has been serviced on HTTP 1.1 connections
 void HttpConnection::clean_up(HttpConnection *connection) {
     std::unique_ptr<HttpConnection> clean_up(connection);
     
@@ -254,7 +252,8 @@ void HttpConnection::clean_up(HttpConnection *connection) {
         clean_up->response_headers.str(std::string());
         clean_up->headers.clear();
         clean_up->set_status(0, "");
-        clean_up->idle_tries = 0;
+        clean_up->last_request = time(NULL);
+        clean_up->body.reset(nullptr);
         HttpPool::get().enqueue(std::bind(&HttpConnection::read,clean_up.release()));
     }
     

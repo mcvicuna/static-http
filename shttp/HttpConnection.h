@@ -42,28 +42,29 @@ private:
     std::string status_reason;
     int bytes_read;
     int requests_handled;
-    int idle_tries;
+    time_t last_request;
     
     std::ostringstream response;
     std::ostringstream response_headers;
     
     const static size_t HTTP_REQUEST_SIZE = 1500;
-    const static int MAX_IDLE_TRIES = 100000;
+    const static int MAX_IDLE_TIMEOUT = 10; // in seconds
     
 public:
     std::string method;
     std::string resource;
     std::map<std::string, std::string> headers;
-    std::string body;
+    std::unique_ptr<std::istream> body;
 
 
 private:
     void parse_request(std::string request);
 public:
     
-    HttpConnection(int socket) : closed(false), close(true), bytes_read(0), idle_tries(0),requests_handled(0) {
+    HttpConnection(int socket) : closed(false), close(true), bytes_read(0),requests_handled(0) {
         fds.fd = socket;
         fds.events = POLLIN|POLLPRI;
+        last_request = time(NULL);
     }
     
 
@@ -74,8 +75,8 @@ public:
     void set_status(int code, const std::string reason);
    
     static void read(HttpConnection *connection);
-    static void write_response(HttpConnection *connection,std::istream *_body=nullptr);
-    static void write_body(HttpConnection *connection,std::istream *_body,const size_t chunk_size);
+    static void write_response(HttpConnection *connection);
+    static void write_body(HttpConnection *connection,const size_t chunk_size);
     
     static void clean_up(HttpConnection *connection);
     

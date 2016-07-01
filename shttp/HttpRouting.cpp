@@ -53,8 +53,8 @@ bool HttpRouting::route(std::unique_ptr<HttpConnection> request) {
     if ( !handled ) {
         request->set_status(HTTP_NOT_FOUND, "Not found");
         std::unique_ptr<std::stringstream> response(new std::stringstream("Couldn't find route"));
-        
-        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),response.release()));
+        request->body = std::move(response);
+        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release()));
     
     }
 

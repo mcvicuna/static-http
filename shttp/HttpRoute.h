@@ -15,14 +15,11 @@ class HttpConnection;
 
 class HttpRoute {
 public:
-    bool handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
-        return do_handle(std::move(request),params);
-    };
-
+    bool handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params);
     
     virtual ~HttpRoute() = default;
 private:
-    virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) = 0;
+    virtual bool do_handle(std::unique_ptr<HttpConnection> & request, std::vector<std::string> params) = 0;
 };
 
 

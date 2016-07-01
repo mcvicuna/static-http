@@ -15,6 +15,7 @@
 
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/syslimits.h>
@@ -28,7 +29,7 @@
 #include "HttpContenttypes.h"
 
 class DefaultRoute : public HttpRoute {
-    virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
+    virtual bool do_handle(std::unique_ptr<HttpConnection>  & request, std::vector<std::string> params) {
         
         
         
@@ -45,49 +46,103 @@ class DefaultRoute : public HttpRoute {
             
             request->write_header(HTTP_HEADER_CONTENT_TYPE, content_type);
             
+            request->body = std::move(file);
+            
         }
         else {
             request->set_status(HTTP_NOT_FOUND, "Not found");
+            request->body.reset(nullptr);
         }
         
-        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),file.release()));
         
         return true;
     };
 };
 
 class EchoRoute : public HttpRoute {
-    virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
+    virtual bool do_handle(std::unique_ptr<HttpConnection> & request, std::vector<std::string> params) {
         std::cerr << "EchoRoute " << request->resource << "?" << params[0];
         
         request->set_status(HTTP_OK, "OK");
         request->write_header(HTTP_HEADER_CONTENT_TYPE, HttpContentTypes::get().get_content_by_name("html"));
         std::unique_ptr<std::stringstream> response(new std::stringstream(params[0]));
         
-        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),response.release()));
+        request->body = std::move(response);
 
         return true;
     };
 };
 
 class FriendRoute : public HttpRoute {
-    virtual bool do_handle(std::unique_ptr<HttpConnection> request, std::vector<std::string> params) {
+    virtual bool do_handle(std::unique_ptr<HttpConnection> & request, std::vector<std::string> params) {
         request->set_status(HTTP_OK, "OK");
         request->write_header(HTTP_HEADER_CONTENT_TYPE, HttpContentTypes::get().get_content_by_name("html"));
         
         std::unique_ptr<std::stringstream> response(new std::stringstream());
         *response << "How would I know if " << params[0] << " and " << params[1] << " are friends " << std::endl;
         
-        HttpPool::get().enqueue(std::bind(&HttpConnection::write_response,request.release(),response.release()));
+        request->body = std::move(response);
 
         return true;
     };
 };
 
+class CGIRoute : public HttpRoute {
+    static std::string default_directory;
+    virtual bool do_handle(std::unique_ptr<HttpConnection> & request, std::vector<std::string> params) {
+        
+        request->set_status(HTTP_ERROR, "This doesn't work yet.");
+        std::cerr << "cgi failure" << std::endl;
+        return true;
+        
+        std::string cgi_command = default_directory + params[0];
+        
+        std::unique_ptr<std::stringstream> response(new std::stringstream());
+        
+        std::cerr << "cgi " << cgi_command << std::endl;
+        
+        FILE *cgi_results = popen(cgi_command.c_str(),"r");
+        if ( cgi_results == NULL ) {
+            request->set_status(HTTP_ERROR, "POPEN failure");
+            std::cerr << "cgi failure POPEN" << cgi_command << std::endl;
+            return true;
+        }
+        
+        char buffer[1024];
+        while ( !feof(cgi_results) ) {
+            if ( fread(buffer, sizeof(char), sizeof(buffer), cgi_results) == -1 ) {
+                pclose(cgi_results);
+                request->set_status(HTTP_ERROR, "POPEN read 2");
+                std::cerr << "cgi failure POPEN" << cgi_command << std::endl;
+                return true;
+
+            }
+            else {
+                *response << buffer;
+            }
+        }
+
+        std::cerr << "cgi failure 3" << cgi_command << std::endl;
+        pclose(cgi_results);
+        
+        
+        request->set_status(HTTP_OK, "OK");
+        request->write_header(HTTP_HEADER_CONTENT_TYPE, HttpContentTypes::get().get_content_by_name("html"));
+
+        std::cerr << "cgi failure POPEN" << cgi_command << std::endl;
+        request->body = std::move(response);
+        
+        return true;
+    };
+};
+
+std::string CGIRoute::default_directory = "/Users/mark/src/shttp/temp/";
+
 
 void setup_routes() {
     HttpRouting::get().addRoute("GET", "([^?]+[^\\/]$)", std::unique_ptr<DefaultRoute>(new DefaultRoute()));
     HttpRouting::get().addRoute("GET", "\\/echo\\?(.+)", std::unique_ptr<EchoRoute>(new EchoRoute()));
+    HttpRouting::get().addRoute("GET", "\\/cgi\\?(.+)", std::unique_ptr<CGIRoute>(new CGIRoute()));
     HttpRouting::get().addRoute("GET", "\\/friend\\/([^/]+)\\/([^/]+)\\/", std::unique_ptr<FriendRoute>(new FriendRoute()));
     
 
