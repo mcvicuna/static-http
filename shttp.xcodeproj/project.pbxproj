@@ -12,6 +12,7 @@
 		4D8955121D2354CE00A1C7DE /* HttpPool.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4D8955101D2354CE00A1C7DE /* HttpPool.cpp */; };
 		4D8955151D2362FA00A1C7DE /* HttpContentTypes.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4D8955131D2362FA00A1C7DE /* HttpContentTypes.cpp */; };
 		4D8955191D23874D00A1C7DE /* HttpConnection.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4D8955171D23874D00A1C7DE /* HttpConnection.cpp */; };
+		4D89551B1D25B62100A1C7DE /* HttpRoute.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4D89551A1D25B62100A1C7DE /* HttpRoute.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -39,6 +40,7 @@
 		4D8955141D2362FA00A1C7DE /* HttpContentTypes.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = HttpContentTypes.h; sourceTree = "<group>"; };
 		4D8955161D2382F200A1C7DE /* HttpResponses.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HttpResponses.h; sourceTree = "<group>"; };
 		4D8955171D23874D00A1C7DE /* HttpConnection.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = HttpConnection.cpp; sourceTree = "<group>"; };
+		4D89551A1D25B62100A1C7DE /* HttpRoute.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = HttpRoute.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +80,7 @@
 				4D89550E1D234CE300A1C7DE /* HttpRouting.cpp */,
 				4D8955081D22C68000A1C7DE /* HttpConnection.h */,
 				4D8955171D23874D00A1C7DE /* HttpConnection.cpp */,
+				4D89551A1D25B62100A1C7DE /* HttpRoute.cpp */,
 				4D8955091D22D72E00A1C7DE /* HttpRouting.h */,
 				4D89550A1D22D73F00A1C7DE /* HttpRoute.h */,
 				4D89550D1D23417100A1C7DE /* HttpPool.h */,
@@ -147,6 +150,7 @@
 				4D8955151D2362FA00A1C7DE /* HttpContentTypes.cpp in Sources */,
 				4D89550F1D234CE300A1C7DE /* HttpRouting.cpp in Sources */,
 				4D8955021D189C6600A1C7DE /* main.cpp in Sources */,
+				4D89551B1D25B62100A1C7DE /* HttpRoute.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
